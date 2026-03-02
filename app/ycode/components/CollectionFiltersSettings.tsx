@@ -585,20 +585,18 @@ export default function CollectionFiltersSettings({
           {operatorRequiresItemSelection(condition.operator) && referenceCollectionId && (
             <>
               {condition.inputLayerId ? (
-                <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs">
-                  <Icon name="filter" className="size-3 text-muted-foreground shrink-0" />
-                  <span className="truncate text-foreground">{getLinkedInputName(condition.inputLayerId)}</span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
-                        onClick={() => handleUnlinkInput(group.id, condition.id)}
-                      >
-                        <Icon name="unlink" className="size-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Unlink filter input</TooltipContent>
-                  </Tooltip>
+                <div className="flex items-center gap-1">
+                  <Input value={getLinkedInputName(condition.inputLayerId)} disabled />
+                  <div className="shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="secondary" onClick={() => handleUnlinkInput(group.id, condition.id)}>
+                          <Icon name="x" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Unlink filter input</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -612,6 +610,7 @@ export default function CollectionFiltersSettings({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
+                        variant="secondary"
                         onClick={(e) => {
                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                           handlePickInputForCondition(group.id, condition.id, {
@@ -740,6 +739,7 @@ export default function CollectionFiltersSettings({
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
+                            variant="secondary"
                             onClick={(e) => {
                               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                               handlePickSecondInputForCondition(group.id, condition.id, {
