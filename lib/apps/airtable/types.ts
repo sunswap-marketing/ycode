@@ -149,6 +149,8 @@ export interface AirtableConnection {
   webhookCursor: number;
   webhookSecret: string | null;
   webhookExpiresAt: string | null;
+  /** Set when a webhook refresh fails (expired/deleted) and fields are cleared */
+  webhookExpiredAt: string | null;
   lastSyncedAt: string | null;
   syncStatus: AirtableSyncStatus;
   syncError: string | null;

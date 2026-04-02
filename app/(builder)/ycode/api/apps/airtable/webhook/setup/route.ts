@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
       webhookId: webhook.id,
       webhookSecret: webhook.macSecretBase64,
       webhookExpiresAt: webhook.expirationTime,
+      webhookExpiredAt: null,
       webhookCursor: 0,
     });
 

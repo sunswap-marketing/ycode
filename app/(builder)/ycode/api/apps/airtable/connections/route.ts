@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
       webhookCursor: 0,
       webhookSecret: null,
       webhookExpiresAt: null,
+      webhookExpiredAt: null,
       lastSyncedAt: null,
       syncStatus: 'idle',
       syncError: null,

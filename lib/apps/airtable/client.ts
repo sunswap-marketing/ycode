@@ -121,4 +121,10 @@ export const airtableApi = {
       `${BASE}/webhook/refresh`,
       { connectionId }
     ),
+
+  disableWebhook: (connectionId: string) =>
+    jsonPost<{ success: boolean }>(
+      `${BASE}/webhook/disable`,
+      { connectionId }
+    ),
 };

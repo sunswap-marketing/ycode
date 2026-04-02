@@ -38,9 +38,7 @@ import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
-import { useSettingsStore } from '@/stores/useSettingsStore';
 import { isFieldTypeCompatible, getAirtableFieldTypeLabel } from '@/lib/apps/airtable/field-mapping';
-import { formatDateInTimezone } from '@/lib/date-format-utils';
 import { formatRelativeTime } from '@/lib/utils';
 import { getFieldIcon, getFieldTypeLabel } from '@/lib/collection-field-utils';
 import { airtableApi } from '@/lib/apps/airtable/client';
@@ -154,8 +152,6 @@ export default function AirtableSettings({
   // Collections from store
   const collections = useCollectionsStore((s) => s.collections);
   const fields = useCollectionsStore((s) => s.fields);
-  const timezone = useSettingsStore((s) => s.settingsByKey.timezone as string | null) ?? 'UTC';
-
   // =========================================================================
   // Load settings on mount
   // =========================================================================
@@ -462,6 +458,16 @@ export default function AirtableSettings({
     }
   };
 
+  const handleDisableWebhook = async (connectionId: string) => {
+    try {
+      await airtableApi.disableWebhook(connectionId);
+      toast.success('Auto-sync disabled');
+      await refreshConnections();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to disable auto-sync');
+    }
+  };
+
   const handleDeleteConnection = async () => {
     if (!connectionToDelete) return;
 
@@ -671,7 +677,6 @@ export default function AirtableSettings({
               <ConnectionCard
                 key={conn.id}
                 connection={conn}
-                timezone={timezone}
                 isSyncing={syncingIds.has(conn.id)}
                 isEditing={editingId === conn.id}
                 editMapping={editingId === conn.id ? editMapping : []}
@@ -681,6 +686,7 @@ export default function AirtableSettings({
                 isSavingEdit={isSavingEdit}
                 onSync={() => handleSync(conn.id)}
                 onSetupWebhook={() => handleSetupWebhook(conn.id)}
+                onDisableWebhook={() => handleDisableWebhook(conn.id)}
                 onDelete={() => setConnectionToDelete(conn)}
                 onGoToCollection={() => {
                   if (onCloseAndNavigate) {
@@ -1001,7 +1007,6 @@ function FieldMappingGrid({
 
 interface ConnectionCardProps {
   connection: AirtableConnection;
-  timezone: string;
   isSyncing: boolean;
   isEditing: boolean;
   editMapping: AirtableFieldMapping[];
@@ -1011,6 +1016,7 @@ interface ConnectionCardProps {
   isSavingEdit: boolean;
   onSync: () => void;
   onSetupWebhook: () => void;
+  onDisableWebhook: () => void;
   onDelete: () => void;
   onGoToCollection: () => void;
   onStartEdit: () => void;
@@ -1021,7 +1027,6 @@ interface ConnectionCardProps {
 
 function ConnectionCard({
   connection,
-  timezone,
   isSyncing,
   isEditing,
   editMapping,
@@ -1031,6 +1036,7 @@ function ConnectionCard({
   isSavingEdit,
   onSync,
   onSetupWebhook,
+  onDisableWebhook,
   onDelete,
   onGoToCollection,
   onStartEdit,
@@ -1051,8 +1057,10 @@ function ConnectionCard({
   };
 
   const webhookLabel = connection.webhookId
-    ? `Webhook sync (expires ${connection.webhookExpiresAt ? formatDateInTimezone(connection.webhookExpiresAt, timezone, 'display') : 'unknown'})`
-    : 'Manual sync';
+    ? 'Auto-syncing with Webhook'
+    : connection.webhookExpiredAt
+      ? `Webhook expired ${formatRelativeTime(connection.webhookExpiredAt, false)}`
+      : 'Manual sync';
 
   return (
     <div className="border rounded-lg bg-secondary/30">
@@ -1097,7 +1105,11 @@ function ConnectionCard({
             <DropdownMenuItem onClick={onStartEdit}>
               Edit mapping
             </DropdownMenuItem>
-            {!connection.webhookId && (
+            {connection.webhookId ? (
+              <DropdownMenuItem onClick={onDisableWebhook}>
+                Disable auto-sync
+              </DropdownMenuItem>
+            ) : (
               <DropdownMenuItem onClick={onSetupWebhook}>
                 Enable auto-sync
               </DropdownMenuItem>

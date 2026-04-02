@@ -28,7 +28,7 @@ import {
   getValueMapByFieldIds,
 } from '@/lib/repositories/collectionItemValueRepository';
 
-import { listAllRecords, getWebhookPayloads, deleteWebhook } from './index';
+import { listAllRecords, getWebhookPayloads, deleteWebhook, refreshWebhook } from './index';
 import { transformFieldValue } from './field-mapping';
 import type { AirtableConnection, AirtableRecord, SyncResult } from './types';
 import type { CollectionFieldType, CollectionField } from '@/types';
@@ -113,6 +113,49 @@ export async function cleanupWebhooks(): Promise<void> {
       // Webhook may already be expired or deleted — safe to ignore
     }
   }
+}
+
+/**
+ * Refresh all active webhooks that expire within the given threshold.
+ * Designed to be called by a daily cron to keep webhooks alive.
+ */
+export async function refreshActiveWebhooks(
+  thresholdDays = 3
+): Promise<{ refreshed: number; failed: number }> {
+  const token = await getAppSettingValue<string>(APP_ID, 'api_token');
+  if (!token) return { refreshed: 0, failed: 0 };
+
+  const connections = await getConnections();
+  const threshold = Date.now() + thresholdDays * 24 * 60 * 60 * 1000;
+  const seen = new Set<string>();
+  let refreshed = 0;
+  let failed = 0;
+
+  for (const conn of connections) {
+    if (!conn.webhookId || seen.has(conn.webhookId)) continue;
+    seen.add(conn.webhookId);
+
+    const expiresAt = conn.webhookExpiresAt ? new Date(conn.webhookExpiresAt).getTime() : 0;
+    if (expiresAt > threshold) continue;
+
+    try {
+      const result = await refreshWebhook(token, conn.baseId, conn.webhookId);
+      await updateConnection(conn.id, { webhookExpiresAt: result.expirationTime });
+      refreshed++;
+    } catch {
+      // Webhook likely expired or was deleted — clear it so the user can re-enable
+      await updateConnection(conn.id, {
+        webhookId: null,
+        webhookSecret: null,
+        webhookExpiredAt: conn.webhookExpiresAt || new Date().toISOString(),
+        webhookExpiresAt: null,
+        webhookCursor: 0,
+      });
+      failed++;
+    }
+  }
+
+  return { refreshed, failed };
 }
 
 // =============================================================================
