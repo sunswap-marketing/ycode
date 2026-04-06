@@ -263,7 +263,7 @@ export default function GeneralSettingsPage() {
         throw new Error(result.error || 'Failed to reset project');
       }
 
-      router.push('/ycode');
+      window.location.href = '/ycode';
     } catch (err) {
       console.error('Error resetting project:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to reset project');
