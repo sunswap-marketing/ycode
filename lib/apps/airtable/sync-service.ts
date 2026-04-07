@@ -662,6 +662,31 @@ function hasChanges(
   return false;
 }
 
+/**
+ * Re-check which Airtable record IDs already exist in the CMS.
+ * Guards against concurrent webhook invocations that race past
+ * the syncStatus check and both try to create the same records.
+ */
+async function getExistingAirtableRecordIds(
+  recordIdFieldId: string,
+  airtableRecordIds: string[]
+): Promise<Set<string>> {
+  if (airtableRecordIds.length === 0) return new Set();
+
+  const client = await getSupabaseAdmin();
+  if (!client) return new Set();
+
+  const { data } = await client
+    .from('collection_item_values')
+    .select('value')
+    .eq('field_id', recordIdFieldId)
+    .eq('is_published', false)
+    .is('deleted_at', null)
+    .in('value', airtableRecordIds);
+
+  return new Set((data || []).map((row) => row.value).filter(Boolean));
+}
+
 // =============================================================================
 // Shared Sync State & Operations
 // =============================================================================
@@ -794,59 +819,70 @@ async function executeBatchOperations(
 
   if (toCreate.length > 0) {
     try {
-      const newItemIds = toCreate.map(() => randomUUID());
-      const newItems = newItemIds.map((id) => ({
-        id,
-        collection_id: collectionId,
-        manual_order: 0,
-        is_published: false,
-        is_publishable: true,
-      }));
+      // Re-check DB to filter out records a concurrent invocation already created
+      const alreadyCreated = await getExistingAirtableRecordIds(
+        ctx.recordIdFieldId,
+        toCreate.map((r) => r.id)
+      );
+      const dedupedToCreate = alreadyCreated.size > 0
+        ? toCreate.filter((r) => !alreadyCreated.has(r.id))
+        : toCreate;
 
-      let nextAutoId = 1;
-      if (ctx.autoFields.idFieldId) {
-        for (const item of existingItems) {
-          const val = existingValues[item.id]?.[ctx.autoFields.idFieldId];
-          if (val) {
-            const num = parseInt(String(val), 10);
-            if (!isNaN(num) && num >= nextAutoId) nextAutoId = num + 1;
+      if (dedupedToCreate.length > 0) {
+        const newItemIds = dedupedToCreate.map(() => randomUUID());
+        const newItems = newItemIds.map((id) => ({
+          id,
+          collection_id: collectionId,
+          manual_order: 0,
+          is_published: false,
+          is_publishable: true,
+        }));
+
+        let nextAutoId = 1;
+        if (ctx.autoFields.idFieldId) {
+          for (const item of existingItems) {
+            const val = existingValues[item.id]?.[ctx.autoFields.idFieldId];
+            if (val) {
+              const num = parseInt(String(val), 10);
+              if (!isNaN(num) && num >= nextAutoId) nextAutoId = num + 1;
+            }
           }
         }
-      }
 
-      const buildValues = async () => {
-        const now = new Date().toISOString();
-        const valuesToInsert: Array<{ item_id: string; field_id: string; value: string | null }> = [];
-        for (let i = 0; i < toCreate.length; i++) {
-          const vals = await buildRecordValues(toCreate[i], ctx);
+        const buildValues = async () => {
+          const now = new Date().toISOString();
+          const valuesToInsert: Array<{ item_id: string; field_id: string; value: string | null }> = [];
+          for (let i = 0; i < dedupedToCreate.length; i++) {
+            const vals = await buildRecordValues(dedupedToCreate[i], ctx);
 
-          if (ctx.autoFields.idFieldId) {
-            vals[ctx.autoFields.idFieldId] = String(nextAutoId++);
-          }
-          if (ctx.autoFields.createdAtFieldId) {
-            vals[ctx.autoFields.createdAtFieldId] = now;
-          }
-          if (ctx.autoFields.updatedAtFieldId) {
-            vals[ctx.autoFields.updatedAtFieldId] = now;
-          }
+            if (ctx.autoFields.idFieldId) {
+              vals[ctx.autoFields.idFieldId] = String(nextAutoId++);
+            }
+            if (ctx.autoFields.createdAtFieldId) {
+              vals[ctx.autoFields.createdAtFieldId] = now;
+            }
+            if (ctx.autoFields.updatedAtFieldId) {
+              vals[ctx.autoFields.updatedAtFieldId] = now;
+            }
 
-          for (const [fieldId, value] of Object.entries(vals)) {
-            valuesToInsert.push({ item_id: newItemIds[i], field_id: fieldId, value });
+            for (const [fieldId, value] of Object.entries(vals)) {
+              valuesToInsert.push({ item_id: newItemIds[i], field_id: fieldId, value });
+            }
           }
+          return valuesToInsert;
+        };
+
+        const [, valuesToInsert] = await Promise.all([
+          createItemsBulk(newItems),
+          buildValues(),
+        ]);
+
+        for (let i = 0; i < valuesToInsert.length; i += BULK_CHUNK_SIZE) {
+          await insertValuesBulk(valuesToInsert.slice(i, i + BULK_CHUNK_SIZE));
         }
-        return valuesToInsert;
-      };
 
-      const [, valuesToInsert] = await Promise.all([
-        createItemsBulk(newItems),
-        buildValues(),
-      ]);
-
-      for (let i = 0; i < valuesToInsert.length; i += BULK_CHUNK_SIZE) {
-        await insertValuesBulk(valuesToInsert.slice(i, i + BULK_CHUNK_SIZE));
+        result.created = dedupedToCreate.length;
       }
-
-      result.created = toCreate.length;
     } catch (error) {
       result.errors.push(`Create failed: ${error instanceof Error ? error.message : 'Unknown'}`);
     }
